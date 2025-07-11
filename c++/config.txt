@@ -1,0 +1,4 @@
+fund_codes = [012976]
+grid_size = 0.05
+sum = 30000
+amount = 2000
