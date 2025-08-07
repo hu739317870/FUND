@@ -5,6 +5,8 @@
 struct Config 
 {
     double grid_size;
+    double big_grid_size;
+    int factor;
     double sum;
     double amount;
     std::vector<std::string> fund_codes;

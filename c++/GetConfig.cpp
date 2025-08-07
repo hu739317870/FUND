@@ -32,6 +32,8 @@ GetConfig::GetConfig(const std::string& filename) : config_()
     }
     if (!config_map.empty()) {
         config_.grid_size = std::stod(config_map["grid_size"]);
+        config_.big_grid_size = std::stod(config_map["big_grid_size"]);
+        config_.factor = std::stoi(config_map["factor"]);
         config_.sum = std::stod(config_map["sum"]);
         config_.amount = std::stod(config_map["amount"]);
         config_.fund_codes = parse_array(config_map["fund_codes"]);
