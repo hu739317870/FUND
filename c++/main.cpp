@@ -24,7 +24,8 @@ enum Period {
     LAST_1_YEAR,
     LAST_3_YEARS,
     LAST_5_YEARS,
-    SINCE_ESTABLISHED
+    SINCE_ESTABLISHED,
+    CUSTOMIZED_TIME
 };
 
 struct Thredhold {
@@ -267,40 +268,80 @@ std::map<long, double>::const_iterator get_start_date(const map<long, double>& n
             last_timestamp = latest_timestamp - 5 * 365 * 24 * 3600;
             break;
         case SINCE_ESTABLISHED:
+        case CUSTOMIZED_TIME:
             return net_worth_data.begin();
         default:
-            break;
+            return net_worth_data.begin();
     }
     auto it = net_worth_data.lower_bound(last_timestamp);
     return it;
 }
 
-Thredhold calculate_thresholds(const map<long, double>& net_worth_data) {
+std::map<long, double>::const_iterator get_end_date(const map<long, double>& net_worth_data, const std::string& period) {
+    auto latest_it = --net_worth_data.end();
+    long latest_timestamp = latest_it->first;
+    long last_timestamp = latest_timestamp;
+
+    switch (static_cast<Period>(std::stoi(period))) {
+        case LAST_3_MONTHS:
+        case LAST_6_MONTHS:
+        case LAST_1_YEAR:
+        case LAST_3_YEARS:
+        case LAST_5_YEARS:
+        case SINCE_ESTABLISHED:
+            return net_worth_data.end();
+        case CUSTOMIZED_TIME:
+            last_timestamp = 1726761600; // 2024-09-20 00:00:00 黎明前
+            break;
+        default:
+            return net_worth_data.end();
+    }
+    auto it = net_worth_data.lower_bound(last_timestamp);
+    return it;
+}
+
+Thredhold calculate_thresholds(std::map<long, double>::const_iterator start_it, std::map<long, double>::const_iterator end_it)
+{
     vector<double> values;
-    for ( auto [key, value] : net_worth_data) {
-        values.push_back(value);
+    for (auto it = start_it; it != end_it; ++it) {
+        values.push_back(it->second);
     }
     sort(values.begin(), values.end());
+
     size_t n = values.size();
     Thredhold thresholds;
-    thresholds.percentile_high = values[n * CONFIG.threshold_high - 1];
-    thresholds.percentile_low = values[n * CONFIG.threshold_low];
+    if (n > 0) {
+        size_t high_index = std::min(static_cast<size_t>(n * CONFIG.threshold_high), n - 1);
+        size_t low_index = std::min(static_cast<size_t>(n * CONFIG.threshold_low), n - 1);
+        
+        thresholds.percentile_high = values[high_index];
+        thresholds.percentile_low = values[low_index];
+    }
     return thresholds;
 }
 
 void calculate_profit(
-    const std::string& fund_code, const std::string& period, const map<long, double>& net_worth_data, map<long, double>::const_iterator start_date_it)
+    const std::string& fund_code, const std::string& period, const map<long, double>& net_worth_data)
 {
-    auto thresholds = calculate_thresholds(net_worth_data);
+    auto start_date_it = get_start_date(net_worth_data, period);
+    cout << "Start date: " << put_time(std::localtime(&start_date_it->first), "%Y-%m-%d") << endl;
+    auto end_date_it = get_end_date(net_worth_data, period);
+    if (std::distance(start_date_it, end_date_it) <= 0) {
+        cerr << "Start date is after end date for fund code: " << fund_code << " and period: " << period << endl;
+        return;
+    }
+
+    auto thresholds = calculate_thresholds(start_date_it, end_date_it);
     double current_balance = CONFIG.sum;
     double current_holdings = 0;
     double total_profit = 0;
     double current_base_price = start_date_it->second;
     double current_big_base_price = start_date_it->second;
     vector<TradeOperation> operations;
-    for_each(start_date_it, net_worth_data.end(), [&](const auto& item) {
+    for_each(start_date_it, end_date_it, [&](const auto& item) {
         long timestamp = item.first;
         double price = item.second;
+        // cout << "Timestamp: " << timestamp << ", Price: " << price << ", base: " << current_base_price << ", big_base: " << current_big_base_price << endl;
         if (current_base_price * (BASE - CONFIG.grid_size) >= price and price < thresholds.percentile_high and price >= thresholds.percentile_low) {
             TradeOperation operation;
             if (current_balance < CONFIG.amount) {
@@ -341,8 +382,8 @@ void calculate_profit(
             }
         }
         else if (current_base_price * (BASE + CONFIG.grid_size) <= price) {
+            current_base_price = price; // 更新基准价格
             for (auto& operation : operations) {
-                current_base_price = price; // 更新基准价格
                 if (operation.money_not_enough || operation.dealed || operation.big_grid_size || operation.buy_price * (BASE + CONFIG.grid_size) > price) {
                     continue;
                 }
@@ -357,8 +398,8 @@ void calculate_profit(
             }
         }
         else if (current_big_base_price * (BASE + CONFIG.big_grid_size) <= price) {
+            current_big_base_price = price; // 更新基准价格
             for (auto& operation : operations) {
-                current_big_base_price = price; // 更新基准价格
                 if (operation.money_not_enough || operation.dealed || !operation.big_grid_size || operation.buy_price * (BASE + CONFIG.big_grid_size) > price) {
                     continue;
                 }
@@ -373,7 +414,7 @@ void calculate_profit(
             }
         }
     });
-    double latest_price = net_worth_data.rbegin()->second;
+    double latest_price = end_date_it->second;
     cout << fund_code << ": Total money left: " << current_balance << endl;
     cout << fund_code << ": Total profit: " << total_profit << endl;
     generate_report(current_balance, fund_code,
@@ -403,9 +444,8 @@ void run_grid_strategy(const string fund_code) {
     }
 
     for (const auto& period : CONFIG.periods) {
-        auto start_date_it = get_start_date(net_worth_data, period);
-        cout << "Start date: " << put_time(std::localtime(&start_date_it->first), "%Y-%m-%d") << endl;
-        calculate_profit(fund_code, period, net_worth_data, start_date_it);
+
+        calculate_profit(fund_code, period, net_worth_data);
         std::cout << std::endl;
     }
 }
@@ -498,7 +538,7 @@ int main_batch_version() {
 
             for (const auto& period : CONFIG.periods) {
                 auto start_date_it = get_start_date(net_worth_data, period);
-                calculate_profit(fund_code, period, net_worth_data, start_date_it);
+                calculate_profit(fund_code, period, net_worth_data);
             }
         });
         
