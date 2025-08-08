@@ -10,7 +10,7 @@
 #include <algorithm>
 
 #include "GetConfig.hpp"
-#include "CppSQLite3/DataBaseStorage.hpp"
+#include "CppSQLite/DataBaseStorage.hpp"
 
 using json = nlohmann::json;
 using namespace std;
@@ -558,4 +558,4 @@ int main_batch_version() {
     return 0;
 }
 */
-// 编译命令：g++ -g -o fund main.cpp GetConfig.cpp CppSQLite3/DataBaseStorage.cpp CppSQLite3/CppSQLite3.cpp -lcurl -lsqlite3 -std=c++17
+// 编译命令：g++ -g -o fund main.cpp GetConfig.cpp CppSQLite/DataBaseStorage.cpp CppSQLite/CppSQLite3.cpp -lcurl -lsqlite3 -std=c++17
