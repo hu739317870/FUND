@@ -204,7 +204,7 @@ void generate_report(
     double balance, string fund_code,
     double holdings, double latest_price, double profit,
     const vector<TradeOperation>& operations,
-    const string& period) 
+    const string& period, double touched_lowest_balance) 
 {
     std::string file_name = "report/" + fund_code + "_" + period + "_report.txt";
     std::ofstream report(file_name);
@@ -217,6 +217,7 @@ void generate_report(
     report << "Holdings Value: " << holdings * latest_price << "(holds " << holdings << " at price " << latest_price << ")" << "  Balance: " << balance << " Total Value: " << holdings * latest_price + balance << endl;
     report << "PS: If Total Value (Holdings Value + Balance) < SUM, that shows you lost money at this moment!!!" << endl;
     report << "Profit: " << profit << "  Loss" << endl;
+    report << "Touched Lowest Balance: " << touched_lowest_balance << endl;
 
     int dealed_count = 0, not_dealed_count = 0;
     std::for_each(operations.begin(), operations.end(), [&](const TradeOperation& operation) {
@@ -268,8 +269,10 @@ std::map<long, double>::const_iterator get_start_date(const map<long, double>& n
             last_timestamp = latest_timestamp - 5 * 365 * 24 * 3600;
             break;
         case SINCE_ESTABLISHED:
-        case CUSTOMIZED_TIME:
             return net_worth_data.begin();
+        case CUSTOMIZED_TIME:
+            last_timestamp = latest_timestamp - 5 * 365 * 24 * 3600;
+            break;
         default:
             return net_worth_data.begin();
     }
@@ -333,6 +336,7 @@ void calculate_profit(
 
     auto thresholds = calculate_thresholds(start_date_it, end_date_it);
     double current_balance = CONFIG.sum;
+    double touched_lowest_balance = current_balance;
     double current_holdings = 0;
     double total_profit = 0;
     double current_base_price = start_date_it->second;
@@ -353,6 +357,7 @@ void calculate_profit(
             }
             else {
                 current_balance -= CONFIG.amount;
+                touched_lowest_balance = std::min(touched_lowest_balance, current_balance);
                 current_holdings += CONFIG.amount / price;
                 current_base_price = price;
                 operation.buy_timestamp = timestamp;
@@ -366,19 +371,19 @@ void calculate_profit(
                 operation.money_not_enough = true;
                 operation.buy_timestamp = timestamp;
                 operation.buy_price = price;
+                operation.big_grid_size = true;
                 operations.push_back(operation);
                 cout << fund_code << ": Not enough money for this operation." << endl;
             }
             else {
                 current_balance -= CONFIG.amount * CONFIG.factor;
+                touched_lowest_balance = std::min(touched_lowest_balance, current_balance);
                 current_holdings += CONFIG.amount * CONFIG.factor / price;
                 current_big_base_price = price;
                 operation.buy_timestamp = timestamp;
                 operation.buy_price = price;
                 operation.big_grid_size = true;
                 operations.push_back(operation);
-                //cout << "buy time: " << put_time(std::localtime(&timestamp), "%Y-%m-%d") << ", price: " << price << endl;
-                //cout << "Money left: " << current_balance << endl;
             }
         }
         else if (current_base_price * (BASE + CONFIG.grid_size) <= price) {
@@ -394,7 +399,6 @@ void calculate_profit(
                 current_balance += (CONFIG.amount / operation.buy_price) * operation.sell_price;
                 current_holdings -= CONFIG.amount / operation.buy_price;
                 operation.dealed = true;
-                //cout << "sell time: " << put_time(std::localtime(&timestamp), "%Y-%m-%d") << ", price: " << price << ", profit: " << profit << endl;
             }
         }
         else if (current_big_base_price * (BASE + CONFIG.big_grid_size) <= price) {
@@ -410,15 +414,15 @@ void calculate_profit(
                 current_balance += (CONFIG.amount * CONFIG.factor / operation.buy_price) * operation.sell_price;
                 current_holdings -= CONFIG.amount * CONFIG.factor / operation.buy_price;
                 operation.dealed = true;
-                //cout << "sell time: " << put_time(std::localtime(&timestamp), "%Y-%m-%d") << ", price: " << price << ", profit: " << profit << endl;
             }
         }
     });
     double latest_price = end_date_it->second;
     cout << fund_code << ": Total money left: " << current_balance << endl;
     cout << fund_code << ": Total profit: " << total_profit << endl;
+    cout << fund_code << ": Touched Lowest Balance: " << touched_lowest_balance << endl;
     generate_report(current_balance, fund_code,
-        current_holdings, latest_price, total_profit, operations, period
+        current_holdings, latest_price, total_profit, operations, period, touched_lowest_balance
     );
     DatabaseStorage db_storage;
     db_storage.add(fund_code, period, current_holdings * latest_price + current_balance,
